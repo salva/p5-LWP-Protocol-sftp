@@ -1,0 +1,6 @@
+Revision history for Perl extension LWP::Protocol::sftp.
+
+0.01  Thu Apr 28 23:41:44 2005
+	- original version; created by h2xs 1.23 with options
+		-AX -n LWP::Protocol::sftp
+
