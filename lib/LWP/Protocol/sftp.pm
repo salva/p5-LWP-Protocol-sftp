@@ -1,6 +1,6 @@
 package LWP::Protocol::sftp;
 
-our $VERSION = '0.01';
+our $VERSION = '0.02';
 
 # BEGIN { local $| =1; print "loading LWP::Protocol::sftp\n"; }
 
@@ -20,7 +20,7 @@ require HTTP::Date;
 require URI::Escape;
 require HTML::Entities;
 
-use Net::SFTP::Foreign;
+use Net::SFTP::Foreign::Compat;
 use Net::SFTP::Foreign::Constants qw(:flags :status);
 use Fcntl qw(S_ISDIR);
 use Sort::Key qw(keysort);
@@ -65,9 +65,9 @@ sub request
 
     my $path  = $url->path;
 
-    my $sftp = eval { Net::SFTP::Foreign->new(host => $host,
-					      user => $user,
-					      port => $port) };
+    my $sftp = eval { Net::SFTP::Foreign::Compat->new(host => $host,
+						      user => $user,
+						      port => $port) };
     if ($@) {
 	return HTTP::Response->new(HTTP::Status::RC_SERVICE_UNAVAILABLE,
 				   "unable to establish ssh connection to remote machine ($@)")
