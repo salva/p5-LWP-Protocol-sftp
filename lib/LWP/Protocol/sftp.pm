@@ -1,6 +1,6 @@
 package LWP::Protocol::sftp;
 
-our $VERSION = '0.02';
+our $VERSION = '0.03';
 
 # BEGIN { local $| =1; print "loading LWP::Protocol::sftp\n"; }
 
@@ -20,10 +20,9 @@ require HTTP::Date;
 require URI::Escape;
 require HTML::Entities;
 
-use Net::SFTP::Foreign::Compat;
+use Net::SFTP::Foreign;
 use Net::SFTP::Foreign::Constants qw(:flags :status);
 use Fcntl qw(S_ISDIR);
-use Sort::Key qw(keysort);
 
 use constant PUT_BLOCK_SIZE => 8192;
 
@@ -40,7 +39,7 @@ sub request
     # check proxy
     defined $proxy and
 	return HTTP::Response->new(HTTP::Status::RC_BAD_REQUEST,
-				  'You can not proxy through the sftpsystem');
+				  'You can not proxy through the sftp subsystem');
 
     # check method
     my $method = $request->method;
@@ -54,23 +53,20 @@ sub request
 				   "LWP::Protocol::sftp::request called for '$scheme'")
     }
 
-    if (defined $url->password) {
-	return HTTP::Response->new(HTTP::Status::RC_NOT_IMPLEMENTED,
-				   "LWP::Protocol::sftp does not support text passwords for authentication")
-    }
-
     my $host = $url->host;
     my $port = $url->port;
     my $user = $url->user;
+    my $password = $url->password;
 
     my $path  = $url->path;
 
-    my $sftp = eval { Net::SFTP::Foreign::Compat->new(host => $host,
-						      user => $user,
-						      port => $port) };
-    if ($@) {
+    my $sftp = Net::SFTP::Foreign->new(host => $host,
+                                       user => $user,
+                                       port => $port,
+                                       password => $password);
+    if ($sftp->error) {
 	return HTTP::Response->new(HTTP::Status::RC_SERVICE_UNAVAILABLE,
-				   "unable to establish ssh connection to remote machine ($@)")
+				   "unable to establish SSH connection to remote machine (".$sftp->error.")")
     }
 
     # handle GET and HEAD methods
@@ -79,7 +75,7 @@ sub request
 
 	if ($method eq 'GET' || $method eq 'HEAD') {
 
-	    my $stat = $sftp->do_stat($path);
+	    my $stat = $sftp->stat($path) or die "remote file stat failed";
 
 	    # check if-modified-since
 	    my $ims = $request->header('If-Modified-Since');
@@ -99,7 +95,7 @@ sub request
 
 	    if (S_ISDIR($stat->perm)) {         # If the path is a directory, process it
 		# generate the HTML for directory
-		my @ls = keysort { $_->{filename} } $sftp->ls($path);
+		my $ls = $sftp->ls($path, ordered => 1) or die "remote ls failed";
 
 		# Make directory listing
 		my $pathe = $path . '/';
@@ -112,7 +108,7 @@ sub request
 		    }
 		    my $desc = HTML::Entities::encode($fn);
 		    qq{<li><a href="$furl">$desc</a>}
-		} @ls;
+		} @$ls;
 
 		# Ensure that the base URL is "/" terminated
 		my $base = $url->clone;
@@ -142,56 +138,39 @@ sub request
 
 	    # read the file
 	    if ($method ne "HEAD") {
-		my $fh = $sftp->do_open($path);
-		my $off = 0;
-
+		my $fh = $sftp->open($path) or die "remote file open failed";
 		$response = $self->collect($arg, $response, sub {
-					       if ($off < $file_size) {
-						   my $content = $sftp->do_read($fh, $off, $size);
-						   my $status = $sftp->status;
-						   my $bytes = length $content;
-						   $off += $bytes;
-						   return \$content if $bytes > 0;
-					       }
-					       return \ "";
-					   });
-		$sftp->do_close($fh);
+                                               my $content = $sftp->read($fh, $size);
+                                               defined $content ? \$content : \"" });
+		$sftp->close($fh) or die "remote file read failed";
 	    }
 	    return $response;
 	}
 
 	# handle PUT method
 	if ($method eq 'PUT') {
-	    my $fh = $sftp->do_open($path, SSH2_FXF_WRITE | SSH2_FXF_CREAT | SSH2_FXF_TRUNC);
+	    my $fh = $sftp->open($path, SSH2_FXF_WRITE | SSH2_FXF_CREAT | SSH2_FXF_TRUNC) or die "remote file open failed";
 
 	    my $content = $request->content;
-	    my $len = length $content;
-	    my $off = 0;
-
-	    while ($off<$len) {
-		my $status = $sftp->do_write($fh, $off, substr($content, $off, PUT_BLOCK_SIZE ));
-		$status == SSH2_FX_OK or die "write failed";
-		$off+=PUT_BLOCK_SIZE
+	    while (length $content) {
+		my $bytes = $sftp->write($fh, $content) or die "remote file write failed";
+                substr($content, 0, $bytes, '');
 	    }
 
-	    $sftp->do_close($fh);
+	    $sftp->close($fh) or die "remote file write failed";
 
-	    #return HTTP::Response->new(&HTTP::Status::RC_INTERNAL_SERVER_ERROR,
-	    #                          "Cannot write file '$path': $!");
-	
 	    return HTTP::Response->new(HTTP::Status::RC_OK);
 	}
 
 	# unsupported method
 	return HTTP::Response->new(HTTP::Status::RC_BAD_REQUEST,
-				  'Library does not allow method ' .
-				  "$method for 'sftp:' URLs");
+                                   "Library does not allow method $method for 'sftp:' URLs");
     };
 
     if ($@) {
-	my ($status, $msg)=$sftp->status;
+	my $error = $sftp->error;
 	return HTTP::Response->new(HTTP::Status::RC_INTERNAL_SERVER_ERROR,
-				   "sftp error: $msg ($status) - $@");
+				   "SFTP error: $@ - $error");
     }
     return $response;
 }
@@ -201,7 +180,7 @@ __END__
 
 =head1 NAME
 
-LWP::Protocol::sftp - adds support for SFTP uris to LWP::Protocol package
+LWP::Protocol::sftp - adds support for SFTP uris to LWP package
 
 =head1 SYNOPSIS
 
@@ -221,16 +200,13 @@ This module is based on L<Net::SFTP::Foreign>.
 L<LWP> and L<Net::SFTP::Foreign> documentation. L<ssh(1)>, L<sftp(1)>
 manual pages. OpenSSH web site at L<http://www.openssh.org>.
 
-=head1 AUTHOR
-
-Salvador FandiE<ntilde>o <sfandino@yahoo.com>
-
 =head1 COPYRIGHT
 
-Copyright (C) 2005 by Salvador FandiE<ntilde>o.
+Copyright (C) 2005, 2006, 2008 by Salvador FandiE<ntilde>o
+(sfandino@yahoo.com).
 
 This library is free software; you can redistribute it and/or modify
-it under the same terms as Perl itself, either Perl version 5.8.4 or,
+it under the same terms as Perl itself, either Perl version 5.10.0 or,
 at your option, any later version of Perl 5 you may have available.
 
 =cut
