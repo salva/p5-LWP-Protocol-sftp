@@ -1,5 +1,9 @@
 Revision history for Perl extension LWP::Protocol::sftp.
 
+0.04  Jun 28, 2009
+        - LWP::Debug is deprecated, don't use it! (bug report by Ryan
+          Niebur).
+
 0.03  Jun 26, 2008
         - update to not use Compat
         - add support for password authentication

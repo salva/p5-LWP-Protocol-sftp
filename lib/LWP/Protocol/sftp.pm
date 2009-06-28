@@ -1,6 +1,6 @@
 package LWP::Protocol::sftp;
 
-our $VERSION = '0.03';
+our $VERSION = '0.04';
 
 # BEGIN { local $| =1; print "loading LWP::Protocol::sftp\n"; }
 
@@ -31,8 +31,6 @@ sub request
     my($self, $request, $proxy, $arg, $size) = @_;
 
     # print __PACKAGE__."->request($self, $request, $proxy, $arg, $size)\n";
-
-    LWP::Debug::trace('()');
 
     $size = 4096 unless defined $size and $size > 0;
 
@@ -202,7 +200,7 @@ manual pages. OpenSSH web site at L<http://www.openssh.org>.
 
 =head1 COPYRIGHT
 
-Copyright (C) 2005, 2006, 2008 by Salvador FandiE<ntilde>o
+Copyright (C) 2005, 2006, 2008, 2009 by Salvador FandiE<ntilde>o
 (sfandino@yahoo.com).
 
 This library is free software; you can redistribute it and/or modify
