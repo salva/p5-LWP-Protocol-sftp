@@ -1,5 +1,11 @@
 Revision history for Perl extension LWP::Protocol::sftp.
 
+0.05  Nov 26, 2012
+        - Handle URLs with out a path part as pointing to '/' and not
+          to the SFTP default '~/' for sane semantics.
+        - Several bugs on directory listing creation corrected
+        - Add support for %DEFAULTS
+
 0.04  Jun 28, 2009
         - LWP::Debug is deprecated, don't use it! (bug report by Ryan
           Niebur).

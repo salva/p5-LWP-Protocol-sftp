@@ -1,6 +1,6 @@
 package LWP::Protocol::sftp;
 
-our $VERSION = '0.04';
+our $VERSION = '0.05';
 
 # BEGIN { local $| =1; print "loading LWP::Protocol::sftp\n"; }
 
@@ -25,6 +25,11 @@ use Net::SFTP::Foreign::Constants qw(:flags :status);
 use Fcntl qw(S_ISDIR);
 
 use constant PUT_BLOCK_SIZE => 8192;
+
+our %DEFAULTS = ( ls  => [],
+                  new => [] );
+
+my $dont_escape_in_paths = '^A-Za-z0-9\-\._~/';
 
 sub request
 {
@@ -57,11 +62,13 @@ sub request
     my $password = $url->password;
 
     my $path  = $url->path;
+    $path = '/' unless defined $path and length $path;
 
     my $sftp = Net::SFTP::Foreign->new(host => $host,
                                        user => $user,
                                        port => $port,
-                                       password => $password);
+                                       password => $password,
+                                       @{$DEFAULTS{new}});
     if ($sftp->error) {
 	return HTTP::Response->new(HTTP::Status::RC_SERVICE_UNAVAILABLE,
 				   "unable to establish SSH connection to remote machine (".$sftp->error.")")
@@ -93,32 +100,35 @@ sub request
 
 	    if (S_ISDIR($stat->perm)) {         # If the path is a directory, process it
 		# generate the HTML for directory
-		my $ls = $sftp->ls($path, ordered => 1) or die "remote ls failed";
+		my $ls = $sftp->ls($path, ordered => 1,
+                                   @{$DEFAULTS{ls}}) or die "remote ls failed";
 
 		# Make directory listing
-		my $pathe = $path . '/';
 		my @lines = map {
-		    my $fn=$_->{filename};
-		    my $furl = URI::Escape::uri_escape($fn);
-		    if (S_ISDIR($_->{a}->perm)) {
-			$fn .= '/';
-			$furl .= '/';
-		    }
+                    my $fn = $_->{filename};
+                    $fn .= '/' if S_ISDIR($_->{a}->perm);
+                    my $furl = URI::Escape::uri_escape($fn, $dont_escape_in_paths);
 		    my $desc = HTML::Entities::encode($fn);
 		    qq{<li><a href="$furl">$desc</a>}
 		} @$ls;
 
-		# Ensure that the base URL is "/" terminated
-		my $base = $url->clone;
-		unless ($base->path =~ m|/$|) {
-		    $base->path($base->path . "/");
-		}
-		my $html = join("\n",
+                $path =~ s|/?$|/|;
+                my $ue_path = URI::Escape::uri_escape($path, $dont_escape_in_paths);
+                my $ee_path = HTML::Entities::encode($path);
+
+                # regenerate base url without password
+                my $base = 'sftp://';
+                $base .= URI::Escape::uri_escape($user) . '@' if defined $user;
+                $base .= URI::Escape::uri_escape($host);
+                $base .= ':' . URI::Escape::uri_escape($port) if defined $port;
+                $base .= $ue_path;
+
+                my $html = join("\n",
 				"<HTML>\n<HEAD>",
-				"<TITLE>Directory $path</TITLE>",
+				"<TITLE>Directory $ee_path</TITLE>",
 				"<BASE HREF=\"$base\">",
 				"</HEAD>\n<BODY>",
-				"<H1>Directory listing of $path</H1>",
+				"<H1>Directory listing of $ee_path</H1>",
 				"<UL>", @lines, "</UL>",
 				"</BODY>\n</HTML>\n");
 
@@ -193,6 +203,11 @@ systems via SFTP.
 
 This module is based on L<Net::SFTP::Foreign>.
 
+The variable C<%LWP::Protocol::sftp::DEFAULTS> can be used to pass
+extra arguments to Net::SFTP::Foreign methods. For instance:
+
+  $LWP::Protocol::sftp::DEFAULTS{new} = [more => '-oBatchMode=yes'];
+
 =head1 SEE ALSO
 
 L<LWP> and L<Net::SFTP::Foreign> documentation. L<ssh(1)>, L<sftp(1)>
@@ -200,7 +215,7 @@ manual pages. OpenSSH web site at L<http://www.openssh.org>.
 
 =head1 COPYRIGHT
 
-Copyright (C) 2005, 2006, 2008, 2009 by Salvador FandiE<ntilde>o
+Copyright (C) 2005, 2006, 2008, 2009, 2012 by Salvador FandiE<ntilde>o
 (sfandino@yahoo.com).
 
 This library is free software; you can redistribute it and/or modify
